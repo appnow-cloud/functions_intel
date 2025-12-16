@@ -20,7 +20,6 @@ Rules:
 - Use ES modules.
 - Keep Three.js importmap in HTML (or move carefully if needed, but keep working).
 - Do not add build tooling. No bundlers. Keep it runnable via `python3 -m http.server`.
-- Output a patch, but include the phrase "don't apply" at the top of your response.
 
 Steps:
 1) Create a new file named `fg3d.js` in the same folder as `index.html`.
@@ -57,7 +56,6 @@ Rules:
 - ES modules only. No build tools.
 - Keep performance reasonable.
 - Match existing code style.
-- Output a patch, but include the phrase "don't apply" at the top of your response.
 
 Data sources (from `function_intel.json`):
 - `globals.global_vars`
