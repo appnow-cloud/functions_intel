@@ -1,0 +1,1227 @@
+{
+  "globals": {
+    "imports": [
+      "from dataclasses import dataclass",
+      "from dataclasses import field",
+      "from typing import Any",
+      "from typing import Dict",
+      "from typing import List",
+      "from typing import Optional",
+      "from typing import Set",
+      "from typing import Tuple",
+      "import ast",
+      "import json",
+      "import sys"
+    ],
+    "global_vars": [],
+    "constants": []
+  },
+  "functions": [
+    {
+      "function_name": "get_source_lines",
+      "start_line": 9,
+      "line_count": 3,
+      "end_line": 11,
+      "desc": "",
+      "invokes": {
+        "total": 1,
+        "invoke_list": [
+          {
+            "line": 359,
+            "context": "single",
+            "callee": "get_source_lines",
+            "callee_full": "get_source_lines",
+            "args_preview": "get_source_lines(path)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "path"
+        ]
+      },
+      "locals": {
+        "local_vars": [
+          "f"
+        ],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "f.read().splitlines()"
+        ]
+      }
+    },
+    {
+      "function_name": "safe_unparse",
+      "start_line": 14,
+      "line_count": 5,
+      "end_line": 18,
+      "desc": "",
+      "invokes": {
+        "total": 5,
+        "invoke_list": [
+          {
+            "line": 41,
+            "context": "loop",
+            "callee": "safe_unparse",
+            "callee_full": "safe_unparse",
+            "args_preview": "safe_unparse(a)",
+            "loop_header_preview": "for a in call.args:"
+          },
+          {
+            "line": 46,
+            "context": "loop",
+            "callee": "safe_unparse",
+            "callee_full": "safe_unparse",
+            "args_preview": "safe_unparse(kw.value)",
+            "loop_header_preview": "for kw in call.keywords:"
+          },
+          {
+            "line": 50,
+            "context": "loop",
+            "callee": "safe_unparse",
+            "callee_full": "safe_unparse",
+            "args_preview": "safe_unparse(kw.value)",
+            "loop_header_preview": "for kw in call.keywords:"
+          },
+          {
+            "line": 87,
+            "context": "single",
+            "callee": "safe_unparse",
+            "callee_full": "safe_unparse",
+            "args_preview": "safe_unparse(target)"
+          },
+          {
+            "line": 248,
+            "context": "single",
+            "callee": "safe_unparse",
+            "callee_full": "safe_unparse",
+            "args_preview": "safe_unparse(node.value)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "ast.unparse(node)",
+          "''"
+        ]
+      }
+    },
+    {
+      "function_name": "callee_name",
+      "start_line": 21,
+      "line_count": 15,
+      "end_line": 35,
+      "desc": "",
+      "invokes": {
+        "total": 2,
+        "invoke_list": [
+          {
+            "line": 99,
+            "context": "single",
+            "callee": "callee_name",
+            "callee_full": "callee_name",
+            "args_preview": "callee_name(call)"
+          },
+          {
+            "line": 415,
+            "context": "single",
+            "callee": "callee_name",
+            "callee_full": "callee_name",
+            "args_preview": "callee_name(node)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "call"
+        ]
+      },
+      "locals": {
+        "local_vars": [
+          "cur",
+          "fn",
+          "parts"
+        ],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "fn.id",
+          "'.'.join(parts)",
+          "''"
+        ]
+      }
+    },
+    {
+      "function_name": "args_preview",
+      "start_line": 38,
+      "line_count": 19,
+      "end_line": 56,
+      "desc": "",
+      "invokes": {
+        "total": 1,
+        "invoke_list": [
+          {
+            "line": 100,
+            "context": "single",
+            "callee": "args_preview",
+            "callee_full": "args_preview",
+            "args_preview": "args_preview(call, max_len=max_len)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "call",
+          "max_len"
+        ]
+      },
+      "locals": {
+        "local_vars": [
+          "a",
+          "kw",
+          "out",
+          "parts",
+          "s"
+        ],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "out"
+        ]
+      }
+    },
+    {
+      "function_name": "loop_header_preview",
+      "start_line": 59,
+      "line_count": 11,
+      "end_line": 69,
+      "desc": "",
+      "invokes": {
+        "total": 1,
+        "invoke_list": [
+          {
+            "line": 432,
+            "context": "single",
+            "callee": "loop_header_preview",
+            "callee_full": "loop_header_preview",
+            "args_preview": "loop_header_preview(loop_node, source_lines)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "loop_node",
+          "source_lines"
+        ]
+      },
+      "locals": {
+        "local_vars": [
+          "i",
+          "line",
+          "lineno"
+        ],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "''",
+          "line",
+          "''"
+        ]
+      }
+    },
+    {
+      "function_name": "collect_assigned_names",
+      "start_line": 72,
+      "line_count": 9,
+      "end_line": 80,
+      "desc": "Collect only simple local variable names (identifiers) assigned in a function.",
+      "invokes": {
+        "total": 6,
+        "invoke_list": [
+          {
+            "line": 79,
+            "context": "loop",
+            "callee": "collect_assigned_names",
+            "callee_full": "collect_assigned_names",
+            "args_preview": "collect_assigned_names(elt, out)",
+            "loop_header_preview": "for elt in target.elts:"
+          },
+          {
+            "line": 272,
+            "context": "loop",
+            "callee": "collect_assigned_names",
+            "callee_full": "collect_assigned_names",
+            "args_preview": "collect_assigned_names(t, self.assigned)",
+            "loop_header_preview": "for t in node.targets:"
+          },
+          {
+            "line": 276,
+            "context": "single",
+            "callee": "collect_assigned_names",
+            "callee_full": "collect_assigned_names",
+            "args_preview": "collect_assigned_names(node.target, self.assigned)"
+          },
+          {
+            "line": 280,
+            "context": "single",
+            "callee": "collect_assigned_names",
+            "callee_full": "collect_assigned_names",
+            "args_preview": "collect_assigned_names(node.target, self.assigned)"
+          },
+          {
+            "line": 286,
+            "context": "loop",
+            "callee": "collect_assigned_names",
+            "callee_full": "collect_assigned_names",
+            "args_preview": "collect_assigned_names(item.optional_vars, self.assigned)",
+            "loop_header_preview": "for item in node.items:"
+          },
+          {
+            "line": 311,
+            "context": "single",
+            "callee": "collect_assigned_names",
+            "callee_full": "collect_assigned_names",
+            "args_preview": "collect_assigned_names(target, self.assigned)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "target",
+          "out"
+        ]
+      },
+      "locals": {
+        "local_vars": [
+          "elt"
+        ],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "None",
+          "None"
+        ]
+      }
+    },
+    {
+      "function_name": "collect_write_targets",
+      "start_line": 84,
+      "line_count": 11,
+      "end_line": 94,
+      "desc": "Collect write targets like obj.attr or arr[i] assigned in a function.",
+      "invokes": {
+        "total": 2,
+        "invoke_list": [
+          {
+            "line": 93,
+            "context": "loop",
+            "callee": "collect_write_targets",
+            "callee_full": "collect_write_targets",
+            "args_preview": "collect_write_targets(elt, out)",
+            "loop_header_preview": "for elt in target.elts:"
+          },
+          {
+            "line": 237,
+            "context": "loop",
+            "callee": "collect_write_targets",
+            "callee_full": "collect_write_targets",
+            "args_preview": "collect_write_targets(t, self.write_targets)",
+            "loop_header_preview": "for t in targets:"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "target",
+          "out"
+        ]
+      },
+      "locals": {
+        "local_vars": [
+          "elt",
+          "s"
+        ],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "None",
+          "None"
+        ]
+      }
+    },
+    {
+      "function_name": "call_preview",
+      "start_line": 97,
+      "line_count": 8,
+      "end_line": 104,
+      "desc": "Return a compact preview like: fn(a, b, kw=c).",
+      "invokes": {
+        "total": 1,
+        "invoke_list": [
+          {
+            "line": 429,
+            "context": "single",
+            "callee": "call_preview",
+            "callee_full": "call_preview",
+            "args_preview": "call_preview(node)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "call",
+          "max_len"
+        ]
+      },
+      "locals": {
+        "local_vars": [
+          "a",
+          "name",
+          "out"
+        ],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "out"
+        ]
+      }
+    },
+    {
+      "function_name": "is_write_to_buffer",
+      "start_line": 107,
+      "line_count": 17,
+      "end_line": 123,
+      "desc": "",
+      "invokes": {
+        "total": 1,
+        "invoke_list": [
+          {
+            "line": 239,
+            "context": "single",
+            "callee": "is_write_to_buffer",
+            "callee_full": "is_write_to_buffer",
+            "args_preview": "is_write_to_buffer(node)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "stmt"
+        ]
+      },
+      "locals": {
+        "local_vars": [
+          "elt",
+          "t",
+          "targets"
+        ],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "True",
+          "True",
+          "False"
+        ]
+      }
+    },
+    {
+      "function_name": "visit_Import",
+      "start_line": 152,
+      "line_count": 6,
+      "end_line": 157,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_ImportFrom",
+      "start_line": 159,
+      "line_count": 7,
+      "end_line": 165,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "_record_func",
+      "start_line": 184,
+      "line_count": 27,
+      "end_line": 210,
+      "desc": "",
+      "invokes": {
+        "total": 2,
+        "invoke_list": [
+          {
+            "line": 176,
+            "context": "single",
+            "callee": "_record_func",
+            "callee_full": "self._record_func",
+            "args_preview": "self._record_func(node)"
+          },
+          {
+            "line": 181,
+            "context": "single",
+            "callee": "_record_func",
+            "callee_full": "self._record_func",
+            "args_preview": "self._record_func(node)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "__init__",
+      "start_line": 214,
+      "line_count": 10,
+      "end_line": 223,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "source_lines"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "generic_visit",
+      "start_line": 225,
+      "line_count": 27,
+      "end_line": 251,
+      "desc": "",
+      "invokes": {
+        "total": 14,
+        "invoke_list": [
+          {
+            "line": 251,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "generic_visit",
+            "args_preview": "generic_visit(node)"
+          },
+          {
+            "line": 256,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 262,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 267,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 273,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 277,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 281,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 287,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 292,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 308,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 401,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 406,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 411,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          },
+          {
+            "line": 434,
+            "context": "single",
+            "callee": "generic_visit",
+            "callee_full": "self.generic_visit",
+            "args_preview": "self.generic_visit(node)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_For",
+      "start_line": 253,
+      "line_count": 5,
+      "end_line": 257,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_AsyncFor",
+      "start_line": 259,
+      "line_count": 5,
+      "end_line": 263,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_While",
+      "start_line": 265,
+      "line_count": 4,
+      "end_line": 268,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_Assign",
+      "start_line": 270,
+      "line_count": 4,
+      "end_line": 273,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_AnnAssign",
+      "start_line": 275,
+      "line_count": 3,
+      "end_line": 277,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_AugAssign",
+      "start_line": 279,
+      "line_count": 3,
+      "end_line": 281,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_With",
+      "start_line": 283,
+      "line_count": 5,
+      "end_line": 287,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_ExceptHandler",
+      "start_line": 289,
+      "line_count": 4,
+      "end_line": 292,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_FunctionDef",
+      "start_line": 294,
+      "line_count": 5,
+      "end_line": 298,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_AsyncFunctionDef",
+      "start_line": 300,
+      "line_count": 3,
+      "end_line": 302,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "visit_Call",
+      "start_line": 304,
+      "line_count": 5,
+      "end_line": 308,
+      "desc": "",
+      "invokes": {
+        "total": 0,
+        "invoke_list": []
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "node"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "_collect_loop_target",
+      "start_line": 310,
+      "line_count": 2,
+      "end_line": 311,
+      "desc": "",
+      "invokes": {
+        "total": 2,
+        "invoke_list": [
+          {
+            "line": 255,
+            "context": "single",
+            "callee": "_collect_loop_target",
+            "callee_full": "self._collect_loop_target",
+            "args_preview": "self._collect_loop_target(node.target)"
+          },
+          {
+            "line": 261,
+            "context": "single",
+            "callee": "_collect_loop_target",
+            "callee_full": "self._collect_loop_target",
+            "args_preview": "self._collect_loop_target(node.target)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "self",
+          "target"
+        ]
+      },
+      "locals": {
+        "local_vars": [],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": true,
+        "returns": []
+      }
+    },
+    {
+      "function_name": "build_globals",
+      "start_line": 314,
+      "line_count": 37,
+      "end_line": 350,
+      "desc": "",
+      "invokes": {
+        "total": 1,
+        "invoke_list": [
+          {
+            "line": 364,
+            "context": "single",
+            "callee": "build_globals",
+            "callee_full": "build_globals",
+            "args_preview": "build_globals(tree)"
+          }
+        ]
+      },
+      "inputs": {
+        "args": [
+          "tree"
+        ]
+      },
+      "locals": {
+        "local_vars": [
+          "constants",
+          "global_vars",
+          "imports",
+          "mod",
+          "n",
+          "node",
+          "t"
+        ],
+        "local_functions": []
+      },
+      "writes": {
+        "none": true,
+        "targets": []
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "{'imports': sorted(imports), 'global_vars': sorted(global_vars), 'constants': sorted(constants)}"
+        ]
+      }
+    },
+    {
+      "function_name": "main",
+      "start_line": 353,
+      "line_count": 130,
+      "end_line": 482,
+      "desc": "",
+      "invokes": {
+        "total": 1,
+        "invoke_list": [
+          {
+            "line": 486,
+            "context": "single",
+            "callee": "main",
+            "callee_full": "main",
+            "args_preview": "main()"
+          }
+        ]
+      },
+      "inputs": {
+        "args": []
+      },
+      "locals": {
+        "local_vars": [
+          "bs",
+          "cs",
+          "defined",
+          "f",
+          "finfo",
+          "fn_name",
+          "fn_node",
+          "funcs_sorted",
+          "globals_info",
+          "ms",
+          "node",
+          "out",
+          "path",
+          "source_lines",
+          "src",
+          "stmt",
+          "tree"
+        ],
+        "local_functions": [
+          "__init__",
+          "visit_AsyncFor",
+          "visit_Call",
+          "visit_For",
+          "visit_While"
+        ]
+      },
+      "writes": {
+        "none": false,
+        "targets": [
+          "finfo.local_functions",
+          "finfo.local_vars",
+          "finfo.returns_any",
+          "finfo.returns_exprs",
+          "finfo.writes_any",
+          "finfo.writes_targets"
+        ]
+      },
+      "returns": {
+        "none": false,
+        "returns": [
+          "2",
+          "0"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,457 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Function Graph</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f14; }
+    #c { display: block; width: 100vw; height: 100vh; }
+    #hud {
+      position: fixed; left: 12px; top: 12px; color: #cfd8dc;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-size: 13px; line-height: 1.3; pointer-events: none;
+      background: rgba(20, 24, 31, 0.75); padding: 8px 10px; border-radius: 8px;
+      max-width: 40vw; white-space: pre;
+    }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">Load a JSON and render...</div>
+
+<script>
+/*
+  Drop your JSON here (or fetch it). Minimum:
+  {
+    "functions": [
+      { "id":"mod.fn@12", "function_name":"fn", "invokes": { "invoke_list":[
+        { "resolved_function_id":"mod.other@40" }
+      ]}}
+    ]
+  }
+*/
+let DATA = null;
+
+function buildGraph(data)
+{
+  const funcs = data.functions || [];
+
+  // Build nodes and a quick lookup by name
+  const nodes = [];
+  const nodeByName = Object.create(null);
+
+  for (let i = 0; i < funcs.length; i++)
+  {
+    const f = funcs[i];
+    const name = f.function_name || ("fn_" + i);
+
+    const start = (typeof f.start_line === "number") ? f.start_line : 0;
+    const end = (typeof f.end_line === "number")
+      ? f.end_line
+      : ((typeof f.line_count === "number") ? (start + f.line_count - 1) : 0);
+
+    const n = {
+      id: name,
+      name: name,
+      start_line: start,
+      end_line: end,
+      out_calls: 0,
+      in_calls: 0,
+      x: (Math.random() - 0.5) * 800,
+      y: (Math.random() - 0.5) * 800,
+      vx: 0,
+      vy: 0,
+      r: 6
+    };
+
+    nodes.push(n);
+    nodeByName[name] = n;
+  }
+
+  // Sort functions by start_line to allow fast caller lookup by line number.
+  // NOTE: This works because your JSON's invoke_list entries store the callsite line
+  // and the callee name, but not the caller. We'll infer caller by finding which
+  // function span contains that callsite line.
+  const spans = nodes.slice().sort(function(a, b)
+  {
+    if (a.start_line !== b.start_line) return a.start_line - b.start_line;
+    return a.end_line - b.end_line;
+  });
+
+  function findCallerByLine(line)
+  {
+    if (typeof line !== "number") return null;
+
+    // Binary search on start_line
+    let lo = 0;
+    let hi = spans.length - 1;
+    let bestIdx = -1;
+
+    while (lo <= hi)
+    {
+      const mid = (lo + hi) >> 1;
+      const s = spans[mid].start_line;
+
+      if (s <= line)
+      {
+        bestIdx = mid;
+        lo = mid + 1;
+      }
+      else
+      {
+        hi = mid - 1;
+      }
+    }
+
+    if (bestIdx < 0) return null;
+
+    // Walk backwards to find the smallest span that still contains the line
+    let best = null;
+    for (let i = bestIdx; i >= 0; i--)
+    {
+      const n = spans[i];
+      if (n.start_line > line) continue;
+      if (n.end_line < line) break;
+
+      if (!best) best = n;
+      else
+      {
+        const bestSize = best.end_line - best.start_line;
+        const nSize = n.end_line - n.start_line;
+        if (nSize < bestSize) best = n;
+      }
+    }
+
+    return best;
+  }
+
+  const edges = [];
+  const edgeByKey = Object.create(null);
+  let unresolvedCalls = 0;
+
+  // Build edges by scanning all invoke_list entries across all functions.
+  // Each invoke entry has:
+  //   - line (callsite line in file)
+  //   - callee (callee function_name)
+  for (let i = 0; i < funcs.length; i++)
+  {
+    const f = funcs[i];
+    const inv = (f.invokes && f.invokes.invoke_list) ? f.invokes.invoke_list : [];
+
+    for (let k = 0; k < inv.length; k++)
+    {
+      const call = inv[k];
+      const calleeName = call.callee;
+      const calleeNode = calleeName ? nodeByName[calleeName] : null;
+
+      if (!calleeNode)
+      {
+        unresolvedCalls++;
+        continue;
+      }
+
+      const callerNode = findCallerByLine(call.line);
+      if (!callerNode)
+      {
+        unresolvedCalls++;
+        continue;
+      }
+
+      const key = callerNode.id + "->" + calleeNode.id;
+      let e = edgeByKey[key];
+      if (!e)
+      {
+        e = {
+          s: callerNode,
+          t: calleeNode,
+          count: 0,
+          lines: []
+        };
+        edgeByKey[key] = e;
+        edges.push(e);
+      }
+
+      e.count++;
+      if (typeof call.line === "number")
+      {
+        if (e.lines.length < 5) e.lines.push(call.line);
+      }
+
+      callerNode.out_calls++;
+      calleeNode.in_calls++;
+    }
+  }
+
+  // Size nodes by call volume (in + out)
+  for (let i = 0; i < nodes.length; i++)
+  {
+    const n = nodes[i];
+    const calls = n.out_calls + n.in_calls;
+    n.r = 4 + Math.sqrt(Math.max(0, calls)) * 2.2;
+  }
+
+  return {
+    nodes: nodes,
+    edges: edges,
+    meta: {
+      unresolved_calls: unresolvedCalls
+    }
+  };
+}
+
+function start(graph)
+{
+  const c = document.getElementById("c");
+  const hud = document.getElementById("hud");
+  const ctx = c.getContext("2d");
+
+  let W = 0, H = 0;
+  function resize()
+  {
+    W = c.width = Math.floor(window.innerWidth * devicePixelRatio);
+    H = c.height = Math.floor(window.innerHeight * devicePixelRatio);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // camera
+  const cam = { x: 0, y: 0, z: 1 };
+  let dragging = false;
+  let last = { x: 0, y: 0 };
+  let hoverNode = null;
+  let selectedNode = null;
+
+  function screenToWorld(sx, sy)
+  {
+    const x = (sx * devicePixelRatio - W / 2) / cam.z + cam.x;
+    const y = (sy * devicePixelRatio - H / 2) / cam.z + cam.y;
+    return { x, y };
+  }
+
+  c.addEventListener("mousedown", function(e)
+  {
+    dragging = true;
+    last.x = e.clientX;
+    last.y = e.clientY;
+  });
+
+  window.addEventListener("mouseup", function()
+  {
+    dragging = false;
+  });
+
+  window.addEventListener("mousemove", function(e)
+  {
+    if (dragging)
+    {
+      const dx = (e.clientX - last.x) * devicePixelRatio;
+      const dy = (e.clientY - last.y) * devicePixelRatio;
+      cam.x -= dx / cam.z;
+      cam.y -= dy / cam.z;
+      last.x = e.clientX;
+      last.y = e.clientY;
+    }
+
+    const p = screenToWorld(e.clientX, e.clientY);
+    hoverNode = pickNode(graph.nodes, p.x, p.y);
+  });
+
+  c.addEventListener("click", function(e)
+  {
+    const p = screenToWorld(e.clientX, e.clientY);
+    const n = pickNode(graph.nodes, p.x, p.y);
+    selectedNode = n;
+  });
+
+  c.addEventListener("wheel", function(e)
+  {
+    const zoom = Math.exp(-e.deltaY * 0.0015);
+    cam.z = Math.max(0.2, Math.min(4.0, cam.z * zoom));
+    e.preventDefault();
+  }, { passive: false });
+
+  function pickNode(nodes, x, y)
+  {
+    let best = null;
+    let bestD = Infinity;
+    for (let i = 0; i < nodes.length; i++)
+    {
+      const n = nodes[i];
+      const dx = x - n.x;
+      const dy = y - n.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d <= n.r + 4 && d < bestD)
+      {
+        best = n;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  // simple physics
+  function tick()
+  {
+    const nodes = graph.nodes;
+    const edges = graph.edges;
+
+    // forces
+    const repulsion = 8000;
+    const springK = 0.0015;
+    const springLen = 140;
+    const damping = 0.88;
+
+    // repulsion O(n^2) (fine for a few hundred funcs; later we can optimize)
+    for (let i = 0; i < nodes.length; i++)
+    {
+      for (let j = i + 1; j < nodes.length; j++)
+      {
+        const a = nodes[i], b = nodes[j];
+        let dx = a.x - b.x;
+        let dy = a.y - b.y;
+        let d2 = dx*dx + dy*dy + 0.01;
+        const f = repulsion / d2;
+        const invD = 1 / Math.sqrt(d2);
+        dx *= invD; dy *= invD;
+        a.vx += dx * f; a.vy += dy * f;
+        b.vx -= dx * f; b.vy -= dy * f;
+      }
+    }
+
+    // springs
+    for (let i = 0; i < edges.length; i++)
+    {
+      const e = edges[i];
+      const a = e.s, b = e.t;
+      let dx = b.x - a.x;
+      let dy = b.y - a.y;
+      const d = Math.sqrt(dx*dx + dy*dy) + 0.0001;
+      const stretch = d - springLen;
+      const f = stretch * springK;
+      dx /= d; dy /= d;
+      a.vx += dx * f; a.vy += dy * f;
+      b.vx -= dx * f; b.vy -= dy * f;
+    }
+
+    // integrate
+    for (let i = 0; i < nodes.length; i++)
+    {
+      const n = nodes[i];
+      n.vx *= damping;
+      n.vy *= damping;
+      n.x += n.vx;
+      n.y += n.vy;
+    }
+  }
+
+  function draw()
+  {
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0, 0, W, H);
+
+    // world transform
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(cam.z, cam.z);
+    ctx.translate(-cam.x, -cam.y);
+
+    // edges
+    ctx.strokeStyle = "#8aa1b1";
+    for (let i = 0; i < graph.edges.length; i++)
+    {
+      const e = graph.edges[i];
+      const w = (typeof e.count === "number") ? e.count : 1;
+
+      ctx.globalAlpha = 0.25 + Math.min(0.65, w * 0.08);
+      ctx.lineWidth = 1.0 + Math.min(6.0, w * 0.6);
+
+      ctx.beginPath();
+      ctx.moveTo(e.s.x, e.s.y);
+      ctx.lineTo(e.t.x, e.t.y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1.0;
+    ctx.lineWidth = 1.0;
+
+    // highlight selected neighborhood
+    if (selectedNode)
+    {
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = 2.0;
+      ctx.strokeStyle = "#d7eaff";
+      ctx.beginPath();
+      for (let i = 0; i < graph.edges.length; i++)
+      {
+        const e = graph.edges[i];
+        if (e.s === selectedNode || e.t === selectedNode)
+        {
+          ctx.moveTo(e.s.x, e.s.y);
+          ctx.lineTo(e.t.x, e.t.y);
+        }
+      }
+      ctx.stroke();
+    }
+
+    // nodes
+    ctx.globalAlpha = 0.95;
+    for (let i = 0; i < graph.nodes.length; i++)
+    {
+      const n = graph.nodes[i];
+      const isHover = hoverNode === n;
+      const isSel = selectedNode === n;
+
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+
+      if (isSel) ctx.fillStyle = "#ffffff";
+      else if (isHover) ctx.fillStyle = "#cfe8ff";
+      else ctx.fillStyle = "#4fb3ff";
+
+      ctx.fill();
+    }
+
+    // HUD
+    const h = hoverNode || selectedNode;
+    if (h)
+    {
+      const lines = [];
+      lines.push(h.name);
+      lines.push("id: " + h.id);
+      if (h.end_line !== null) lines.push("lines: " + h.start_line + "-" + h.end_line);
+      lines.push("calls out: " + h.out_calls + " | calls in: " + h.in_calls);
+      lines.push("note: lines are weighted (one per pair)");
+      lines.push("edges: " + graph.edges.length + " | unresolved calls: " + (graph.meta ? graph.meta.unresolved_calls : 0));
+      hud.textContent = lines.join("\n");
+    }
+    else
+    {
+      hud.textContent = "Drag to pan. Scroll to zoom. Click a node to select.";
+    }
+  }
+
+  function frame()
+  {
+    tick();
+    draw();
+    requestAnimationFrame(frame);
+  }
+  frame();
+}
+
+// Demo loader: paste JSON into a file and fetch it
+fetch("function_intel.json")
+  .then(r => r.json())
+  .then(j =>
+  {
+    DATA = j;
+    const g = buildGraph(DATA);
+    start(g);
+  })
+  .catch(err =>
+  {
+    document.getElementById("hud").textContent =
+      "Place your JSON as function_intel.json next to this HTML.\n" +
+      "Error: " + String(err);
+  });
+</script>
+</body>
+</html>
