@@ -30,6 +30,13 @@ A simple static file server is enough.
 
 `py_intel.py` is a standalone static-analysis tool.
 
+Run it directly against a Python file and write the emitted JSON to the
+Functions Graph 3D folder:
+
+```bash
+python3 py_intel.py path/to/source.py > function_intel.json
+```
+
 It parses Python source code and extracts:
 
 - Functions and their relationships
@@ -47,7 +54,9 @@ The script outputs a single file:
 function_intel.json
 ```
 
-This JSON file is the contract between analysis and visualization.
+This JSON file is the contract between analysis and visualization. It is
+emitted to stdout by default; redirect it into `function_intel.json` so the
+viewer can load it without further configuration.
 
 Important properties:
 - The Python script runs independently.
@@ -68,7 +77,9 @@ It contains:
 - Runtime and static metadata
 - Variable and constant references
 
-The viewer assumes this file exists at the project root (same folder as `index.html`).
+The viewer assumes this file exists at the project root (same folder as
+`index.html`). The JavaScript toolkit fetches it on page load and builds the
+scene graph in memory before rendering.
 
 If the file name or path changes, update the loader in the JavaScript toolkit.
 
@@ -130,7 +141,8 @@ Then open:
 http://localhost:8000/index.html
 ```
 
-The app will automatically load `function_intel.json`.
+The app will automatically load `function_intel.json` via `fetch` from the same
+directory and re-render whenever the file is updated and the page is reloaded.
 
 ---
 

@@ -1,5 +1,8 @@
 # AGENTS.md
 
+This repository keeps the canonical **Codex Refactor Prompts — Functions Graph 3D**
+section in this file so the toolkit guidance is always close at hand.
+
 ## Codex Refactor Prompts — Functions Graph 3D
 
 ### Task A — Split HTML and JavaScript (Toolkit Refactor)
