@@ -309,10 +309,71 @@ function start3D(graph, options)
   let viewMode = "3d";
 
   const scene = new THREE.Scene();
+
+  // Dev hook: temporary fog disable.
+  // Toggle in DevTools: window.__FG_NO_FOG = true|false
+  // Default is ON (fog disabled) for this patch.
+  if (typeof window !== "undefined" && window.__FG_NO_FOG == null)
+  {
+    window.__FG_NO_FOG = true;
+  }
   scene.fog = new THREE.Fog(0x0b0f14, 800, 2600);
 
   function updateFog()
   {
+
+    // Dev hook: temporary fog disable (reversible, part A).
+    // Toggle in DevTools: window.__FG_NO_FOG = true|false
+    // When disabling fog, we cache the previous fog so it can be restored.
+    if (typeof window !== "undefined")
+    {
+      // Cache slot lives on window so it survives hot reloads.
+      if (window.__FG_FOG_SAVED == null) window.__FG_FOG_SAVED = null;
+
+      if (window.__FG_NO_FOG)
+      {
+        if (scene)
+        {
+          // Save existing fog exactly once while we disable.
+          if (!window.__FG_FOG_SAVED && scene.fog)
+          {
+            const f = scene.fog;
+            window.__FG_FOG_SAVED = {
+              kind: (f && f.isFogExp2) ? "exp2" : "linear",
+              color: (f && f.color) ? f.color.getHex() : 0x000000,
+              near: (typeof f.near === "number") ? f.near : 1,
+              far: (typeof f.far === "number") ? f.far : 2000,
+              density: (typeof f.density === "number") ? f.density : 0.002
+            };
+          }
+
+          // Disable fog.
+          if (scene.fog) scene.fog = null;
+        }
+        return;
+      }
+    }
+
+    // Dev hook restore (part B).
+    // If fog was disabled and user turns it back on, restore what we cached.
+    if (typeof window !== "undefined" && !window.__FG_NO_FOG)
+    {
+      if (scene && !scene.fog && window.__FG_FOG_SAVED)
+      {
+        const s = window.__FG_FOG_SAVED;
+        if (s.kind === "exp2")
+        {
+          scene.fog = new THREE.FogExp2(s.color, s.density);
+        }
+        else
+        {
+          scene.fog = new THREE.Fog(s.color, s.near, s.far);
+        }
+
+        // Clear cache after restore so later updates behave normally.
+        window.__FG_FOG_SAVED = null;
+      }
+    }
     const d = camera.position.distanceTo(controls.target);
     const near = Math.max(320, d * 0.55);
     const far = Math.max(near + 500, d * 1.85);
@@ -358,12 +419,28 @@ function start3D(graph, options)
   const rtActiveMat = new THREE.MeshStandardMaterial({ color: 0xffd54f });
   const rtCalleeMat = new THREE.MeshStandardMaterial({ color: 0xff8a65 });
 
-  // Runtime/3D: optional argument nodes (unique by name)
-  const argNodes = []; // { name, owners, x,y,z,vx,vy,vz,r,mesh,target }
+  // Runtime/3D: signature argument nodes (unique by name)
+  // These come ONLY from static `inputs.args`.
+  const argNodes = []; // { name, owners, x,y,z,vx,vy,vz,r,mesh,target,_scale }
   const argNodeByName = Object.create(null);
+
+  // Runtime/3D: runtime/callsite token nodes (unique by name)
+  // These come ONLY from callsite `args_preview` lexical tokens.
+  // Patch 6 (Future Hook): token nodes may later be value-bound strictly by runtime evidence.
+  // No value inference or visualization is allowed in this patch series.
+  const tokenNodes = []; // { name, owners, x,y,z,vx,vy,vz,r,mesh,target,_scale,value }
+  const tokenNodeByName = Object.create(null);
+
+  // One toggle controls showing BOTH args + tokens (still separate visuals).
   let rtShowArgNodes = true;
 
+  // Visual type separation:
+  // - signature args: purple, normal size
+  // - runtime tokens: teal, 0.8x size (smaller than purple cubes)
   const argMat = new THREE.MeshStandardMaterial({ color: 0xb400ff });
+  const tokenMat = new THREE.MeshStandardMaterial({ color: 0x00c2c7 });
+  // Patch update: teal token cubes should be smaller than purple args.
+  const TOKEN_SCALE = 0.80;
 
   function makeLabelSprite(text, opts)
   {
@@ -426,6 +503,14 @@ function start3D(graph, options)
     // World scale: tune to your scene size
     const worldScale = o.worldScale || 0.55;
     spr.scale.set(w * worldScale, h * worldScale, 1);
+
+    // Store base scale so we can dynamically scale labels with zoom.
+    spr.userData = spr.userData || {};
+    spr.userData.baseScale = {
+      x: spr.scale.x,
+      y: spr.scale.y,
+      z: spr.scale.z
+    };
 
     return spr;
   }
@@ -630,9 +715,150 @@ function start3D(graph, options)
         an.owners[fnName] = true;
       }
     }
+
+    // Also build runtime token nodes from callsite args_preview so we can show
+    function extractCallsiteNames(argsPreview)
+    {
+      const out = [];
+      const s = String(argsPreview || "");
+      if (!s) return out;
+
+      const toks = s.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+
+      const stop = {
+        "true":1,"false":1,"none":1,"null":1,
+        "and":1,"or":1,"not":1,"in":1,"is":1,
+        "for":1,"while":1,"if":1,"else":1,"elif":1,
+        "return":1,"break":1,"continue":1,
+        "int":1,"float":1,"str":1,"list":1,"dict":1,"set":1,"tuple":1,
+        "min":1,"max":1,"abs":1,"len":1,"range":1,"print":1
+      };
+
+      for (let i = 0; i < toks.length; i++)
+      {
+        const t = toks[i];
+        const tl = t.toLowerCase();
+        if (stop[tl]) continue;
+        if (t.length <= 1) continue;
+        out.push(t);
+      }
+
+      return out;
+    }
+
+    // Helper to find caller node by line (for arg nodes), decoupled from spansForCaller/findCallerNodeByLine
+    function findCallerNodeByLineFromGraph(line)
+    {
+      if (typeof line !== "number") return null;
+
+      const spans = graph.nodes.slice().sort(function(a, b)
+      {
+        if (a.start_line !== b.start_line) return a.start_line - b.start_line;
+        return a.end_line - b.end_line;
+      });
+
+      let lo = 0;
+      let hi = spans.length - 1;
+      let bestIdx = -1;
+
+      while (lo <= hi)
+      {
+        const mid = (lo + hi) >> 1;
+        const s = spans[mid].start_line;
+        if (s <= line)
+        {
+          bestIdx = mid;
+          lo = mid + 1;
+        }
+        else hi = mid - 1;
+      }
+
+      if (bestIdx < 0) return null;
+
+      let best = null;
+      for (let i = bestIdx; i >= 0; i--)
+      {
+        const n = spans[i];
+        if (n.start_line > line) continue;
+        if (n.end_line < line) break;
+
+        if (!best) best = n;
+        else
+        {
+          const bestSize = best.end_line - best.start_line;
+          const nSize = n.end_line - n.start_line;
+          if (nSize < bestSize) best = n;
+        }
+      }
+
+      return best;
+    }
+
+    // Harvest caller-side names from invoke_list args_preview.
+    for (let i = 0; i < funcs.length; i++)
+    {
+      const calleeFn = funcs[i];
+      const inv = (calleeFn && calleeFn.invokes && Array.isArray(calleeFn.invokes.invoke_list))
+        ? calleeFn.invokes.invoke_list
+        : [];
+
+      for (let k = 0; k < inv.length; k++)
+      {
+        const call = inv[k];
+        const callerNode = findCallerNodeByLineFromGraph(call.line);
+        const callerName = callerNode ? callerNode.id : "";
+        if (!callerName) continue;
+
+        const names = extractCallsiteNames(call.args_preview);
+        for (let j = 0; j < names.length; j++)
+        {
+          const nm = String(names[j] || "");
+          if (!nm) continue;
+
+          // Non-destructive classification (structural only):
+          // If a name exists as a signature arg, it must NEVER become a token.
+          if (argNodeByName[nm])
+          {
+            continue;
+          }
+
+          let tn = tokenNodeByName[nm];
+          if (!tn)
+          {
+            tn = {
+              name: nm,
+              owners: Object.create(null),
+              x: (Math.random() - 0.5) * 200,
+              y: (Math.random() - 0.5) * 200,
+              z: (Math.random() - 0.5) * 200,
+              vx: 0,
+              vy: 0,
+              vz: 0,
+              r: 4.0,
+              mesh: null,
+              target: { x: 0, y: 0, z: 0 },
+              _scale: 1.0,
+
+              // Patch 6 (Future Hook): value binding is a future capability.
+              // This placeholder must remain null/empty unless runtime evidence explicitly supplies it.
+              value: {
+                kind: null,        // e.g. "scalar" | "array" | "image" (future)
+                source: null,      // e.g. "runtime" (future)
+                step_index: null,  // which runtime step first bound this value (future)
+                preview: null      // short string preview only (future)
+              }
+            };
+            tokenNodeByName[nm] = tn;
+            tokenNodes.push(tn);
+          }
+
+          tn.owners[callerName] = true;
+        }
+      }
+    }
   })();
 
-  // Create meshes for argument nodes (purple cubes)
+  // Create meshes for signature argument nodes (purple cubes)
   for (let i = 0; i < argNodes.length; i++)
   {
     const a = argNodes[i];
@@ -657,8 +883,35 @@ function start3D(graph, options)
     mesh.userData.labelSprite = argLabel;
   }
 
-  // --- argument links: line segments from arg nodes to owning function nodes ---
-  const argLinks = []; // { a: argNode, n: functionNode }
+  // Create meshes for runtime/callsite token nodes (teal cubes, 1.4x larger)
+  for (let i = 0; i < tokenNodes.length; i++)
+  {
+    const t = tokenNodes[i];
+    const s = 6 * TOKEN_SCALE;
+    const geo = new THREE.BoxGeometry(s, s, s);
+    const mesh = new THREE.Mesh(geo, tokenMat);
+    mesh.userData.tokenNode = t;
+    mesh.position.set(t.x, t.y, t.z);
+    mesh.visible = false; // only visible in Runtime/3D when enabled
+    t.mesh = mesh;
+    scene.add(mesh);
+
+    const tokLabel = makeLabelSprite(t.name, {
+      fontSize: 16,
+      worldScale: 0.45,
+      bg: "rgba(0,0,0,0.70)",
+      fg: "#ffffff",
+      radius: 10
+    });
+    tokLabel.position.set(0, 10, 0);
+    mesh.add(tokLabel);
+    mesh.userData.labelSprite = tokLabel;
+  }
+
+  // --- data links: line segments from arg/token cubes to owning function nodes ---
+  const argLinks = [];   // { a: argNode, n: functionNode }
+  const tokenLinks = []; // { t: tokenNode, n: functionNode }
+
   for (let i = 0; i < argNodes.length; i++)
   {
     const a = argNodes[i];
@@ -670,8 +923,22 @@ function start3D(graph, options)
     }
   }
 
+  for (let i = 0; i < tokenNodes.length; i++)
+  {
+    const t = tokenNodes[i];
+    for (const fn in t.owners)
+    {
+      const n = nodeById[fn];
+      if (!n) continue;
+      tokenLinks.push({ t: t, n: n });
+    }
+  }
+
   let argLinkLine = null;
   let argLinkPos = null;
+
+  let tokenLinkLine = null;
+  let tokenLinkPos = null;
 
   if (argLinks.length)
   {
@@ -692,27 +959,68 @@ function start3D(graph, options)
     scene.add(argLinkLine);
   }
 
+  if (tokenLinks.length)
+  {
+    tokenLinkPos = new Float32Array(tokenLinks.length * 2 * 3);
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(tokenLinkPos, 3));
+    geo.attributes.position.setUsage(THREE.DynamicDrawUsage);
+
+    const mat = new THREE.LineBasicMaterial({
+      color: 0x00c2c7,
+      transparent: true,
+      opacity: 0.22
+    });
+
+    tokenLinkLine = new THREE.LineSegments(geo, mat);
+    tokenLinkLine.visible = false;
+    scene.add(tokenLinkLine);
+  }
+
   function updateArgLinkLines()
   {
-    if (!argLinkLine || !argLinkPos) return;
-
-    for (let i = 0; i < argLinks.length; i++)
+    if (argLinkLine && argLinkPos)
     {
-      const L = argLinks[i];
-      const a = L.a;
-      const n = L.n;
+      for (let i = 0; i < argLinks.length; i++)
+      {
+        const L = argLinks[i];
+        const a = L.a;
+        const n = L.n;
 
-      const o = i * 6;
-      argLinkPos[o + 0] = a.x;
-      argLinkPos[o + 1] = a.y;
-      argLinkPos[o + 2] = a.z;
+        const o = i * 6;
+        argLinkPos[o + 0] = a.x;
+        argLinkPos[o + 1] = a.y;
+        argLinkPos[o + 2] = a.z;
 
-      argLinkPos[o + 3] = n.x;
-      argLinkPos[o + 4] = n.y;
-      argLinkPos[o + 5] = n.z;
+        argLinkPos[o + 3] = n.x;
+        argLinkPos[o + 4] = n.y;
+        argLinkPos[o + 5] = n.z;
+      }
+
+      argLinkLine.geometry.attributes.position.needsUpdate = true;
     }
 
-    argLinkLine.geometry.attributes.position.needsUpdate = true;
+    if (tokenLinkLine && tokenLinkPos)
+    {
+      for (let i = 0; i < tokenLinks.length; i++)
+      {
+        const L = tokenLinks[i];
+        const t = L.t;
+        const n = L.n;
+
+        const o = i * 6;
+        tokenLinkPos[o + 0] = t.x;
+        tokenLinkPos[o + 1] = t.y;
+        tokenLinkPos[o + 2] = t.z;
+
+        tokenLinkPos[o + 3] = n.x;
+        tokenLinkPos[o + 4] = n.y;
+        tokenLinkPos[o + 5] = n.z;
+      }
+
+      tokenLinkLine.geometry.attributes.position.needsUpdate = true;
+    }
   }
 
   // Runtime: track "touched" data names as we step (heuristic).
@@ -809,16 +1117,6 @@ function start3D(graph, options)
 
     const calleeFn = funcByName[step.callee];
 
-    // Tag globals/functions when a touched name matches known static intel.
-    const globals = (DATA && DATA.globals && Array.isArray(DATA.globals.global_vars))
-      ? DATA.globals.global_vars
-      : [];
-    const globalSet = Object.create(null);
-    for (let gi = 0; gi < globals.length; gi++)
-    {
-      const gn = globals[gi];
-      if (gn) globalSet[String(gn)] = true;
-    }
 
     // 1) Callee inputs (var-ish)
     if (calleeFn && calleeFn.inputs && Array.isArray(calleeFn.inputs.args))
@@ -841,10 +1139,18 @@ function start3D(graph, options)
       const nm = names[i];
       if (!nm) continue;
 
-      // If the token matches a function name, prefer labeling as a function.
-      if (funcByName && funcByName[nm]) addTouch(nm, step.line, "function");
-      else if (globalSet[nm]) addTouch(nm, step.line, "global");
-      else addTouch(nm, step.line, "token");
+      // Patch 5 (Structural Truth Rule):
+      // Do not infer meaning/type from name matches.
+      // Only mark what the JSON structurally declares or the runtime/callsite reveals.
+      // Patch 2 stays in force: signature args remain args.
+      if (argNodeByName && argNodeByName[nm])
+      {
+        addTouch(nm, step.line, "input");
+      }
+      else
+      {
+        addTouch(nm, step.line, "token");
+      }
     }
 
     // 4) Writes targets (normalize to base identifier)
@@ -877,7 +1183,7 @@ function start3D(graph, options)
     function pickKindLabel(kinds)
     {
       const ks = kinds || Object.create(null);
-      const order = ["function", "global", "input", "local", "output", "token"];
+      const order = ["input", "local", "output", "token"];
       for (let i = 0; i < order.length; i++)
       {
         if (ks[order[i]]) return order[i];
@@ -887,8 +1193,6 @@ function start3D(graph, options)
 
     function kindText(k)
     {
-      if (k === "function") return "function";
-      if (k === "global") return "global";
       if (k === "input") return "input";
       if (k === "local") return "local";
       if (k === "output") return "output";
@@ -1243,8 +1547,66 @@ function start3D(graph, options)
       const spr = a.mesh.userData ? a.mesh.userData.labelSprite : null;
       if (!spr) continue;
 
-      if (!activeOnly) spr.visible = true;
-      else spr.visible = !!(calleeId && a.owners && a.owners[calleeId]);
+      // In active-only mode, hide cubes that do not belong to the active caller/callee.
+      // This keeps the 3D scene readable (functions stay visible).
+      if (a.mesh)
+      {
+        if (!rtShowArgNodes) a.mesh.visible = false;
+        else if (!activeOnly) a.mesh.visible = true;
+        else
+        {
+          const ownedByCallee = !!(calleeId && a.owners && a.owners[calleeId]);
+          const ownedByCaller = !!(callerId && a.owners && a.owners[callerId]);
+          a.mesh.visible = (ownedByCallee || ownedByCaller);
+        }
+      }
+
+      if (!activeOnly)
+      {
+        spr.visible = true;
+      }
+      else
+      {
+        const ownedByCallee = !!(calleeId && a.owners && a.owners[calleeId]);
+        const ownedByCaller = !!(callerId && a.owners && a.owners[callerId]);
+        spr.visible = (ownedByCallee || ownedByCaller);
+      }
+    }
+
+    // Token cube labels (Patch 3: Active Step Label Guarantee)
+    for (let i = 0; i < tokenNodes.length; i++)
+    {
+      const t = tokenNodes[i];
+      if (!t || !t.mesh) continue;
+      const spr = t.mesh.userData ? t.mesh.userData.labelSprite : null;
+      if (!spr) continue;
+
+      if (t.mesh)
+      {
+        if (!rtShowArgNodes) t.mesh.visible = false;
+        else if (!activeOnly) t.mesh.visible = true;
+        else
+        {
+          const touchedNow = !!(touchedThisStep && touchedThisStep[t.name]);
+          const ownedByCallee = !!(calleeId && t.owners && t.owners[calleeId]);
+          const ownedByCaller = !!(callerId && t.owners && t.owners[callerId]);
+          t.mesh.visible = (touchedNow && (ownedByCallee || ownedByCaller));
+        }
+      }
+
+      if (!activeOnly)
+      {
+        spr.visible = true;
+      }
+      else
+      {
+        // In active-only mode, ensure any token touched on the CURRENT step
+        // shows its label, but only within the current caller/callee context.
+        const touchedNow = !!(touchedThisStep && touchedThisStep[t.name]);
+        const ownedByCallee = !!(calleeId && t.owners && t.owners[calleeId]);
+        const ownedByCaller = !!(callerId && t.owners && t.owners[callerId]);
+        spr.visible = (touchedNow && (ownedByCallee || ownedByCaller));
+      }
     }
   }
 
@@ -1522,6 +1884,7 @@ function start3D(graph, options)
     clampRtIndex();
     touchFromStep(rtSteps[rtIndex]);
     renderTouchedHud();
+    syncRuntimeLabelVisibility(rtSteps[rtIndex]);
     renderRuntimeList();
     updateRuntimeControls();
     rtAccum = 0.9 * 0.75;
@@ -1531,14 +1894,19 @@ function start3D(graph, options)
   function stepRt(delta)
   {
     if (!rtSteps.length) return;
+    const n = rtSteps.length;
     rtIndex += delta;
-    if (rtIndex < 0) rtIndex = 0;
-    if (rtIndex >= rtSteps.length) rtIndex = rtSteps.length - 1;
 
-    if (rtSteps.length && rtIndex >= rtSteps.length - 1) freezeTouchCounts = true;
+    // Wrap instead of clamping.
+    if (rtIndex < 0) rtIndex = n - 1;
+    if (rtIndex >= n) rtIndex = 0;
+
+    // If we ever complete a full run (hit the end), freeze counts on subsequent loops.
+    if (n && rtIndex === 0 && delta > 0) freezeTouchCounts = true;
 
     touchFromStep(rtSteps[rtIndex]);
     renderTouchedHud();
+    syncRuntimeLabelVisibility(rtSteps[rtIndex]);
     renderRuntimeList();
     updateRuntimeControls();
     rtAccum = 0.9 * 0.75;
@@ -1802,15 +2170,21 @@ function start3D(graph, options)
 
       if (rtShowInactiveVars) resizeVarsMinimap();
 
-      // Show/hide argument nodes in Runtime/3D
+      // Show/hide signature args + runtime tokens in Runtime/3D
       rtShowArgNodes = rtShowArgNodesEl ? !!rtShowArgNodesEl.checked : rtShowArgNodes;
       for (let i = 0; i < argNodes.length; i++)
       {
         const m = argNodes[i].mesh;
         if (m) m.visible = rtShowArgNodes;
       }
+      for (let i = 0; i < tokenNodes.length; i++)
+      {
+        const m = tokenNodes[i].mesh;
+        if (m) m.visible = rtShowArgNodes;
+      }
 
       if (argLinkLine) argLinkLine.visible = rtShowArgNodes;
+      if (tokenLinkLine) tokenLinkLine.visible = rtShowArgNodes;
     }
 
 
@@ -1839,7 +2213,7 @@ function start3D(graph, options)
       lastLabelCaller = "";
       lastLabelCallee = "";
 
-      // Hide and reset argument nodes when not in Runtime/3D
+      // Hide and reset signature args + runtime tokens when not in Runtime/3D
       for (let i = 0; i < argNodes.length; i++)
       {
         const a = argNodes[i];
@@ -1852,7 +2226,20 @@ function start3D(graph, options)
         }
       }
 
+      for (let i = 0; i < tokenNodes.length; i++)
+      {
+        const t = tokenNodes[i];
+        if (t.mesh)
+        {
+          t.mesh.visible = false;
+          t._scale = 1.0;
+          t.mesh.scale.set(1, 1, 1);
+          t.mesh.material.color.setHex(0x00c2c7);
+        }
+      }
+
       if (argLinkLine) argLinkLine.visible = false;
+      if (tokenLinkLine) tokenLinkLine.visible = false;
     }
 
     // Ensure highlight state matches current mode.
@@ -2277,12 +2664,34 @@ function start3D(graph, options)
     });
   }
 
+
   if (rtShowArgNodesEl)
   {
     rtShowArgNodesEl.addEventListener("change", function()
     {
       rtShowArgNodes = !!rtShowArgNodesEl.checked;
       applyUIState();
+    });
+  }
+
+  // Hide HUD checkbox (toggles a body class; CSS handles the actual hiding).
+  const hudHideEl = document.getElementById("hud_hide");
+
+  function setHudHidden(hidden)
+  {
+    if (typeof document === "undefined" || !document.body) return;
+    if (hidden) document.body.classList.add("hud_hidden");
+    else document.body.classList.remove("hud_hidden");
+  }
+
+  // Default: HUD visible.
+  setHudHidden(false);
+
+  if (hudHideEl)
+  {
+    hudHideEl.addEventListener("change", function()
+    {
+      setHudHidden(!!hudHideEl.checked);
     });
   }
 
@@ -2405,6 +2814,78 @@ function start3D(graph, options)
     const springLen = 160;
     const damping = 0.86;
 
+    // Runtime pinning for active teal tokens
+    const pinK = 0.020;
+    const pinDamping = 0.70;
+
+    let activeCallerId = "";
+    let activeCalleeId = "";
+    let pinEnabled = false;
+
+    const pinMid = new THREE.Vector3();
+    const pinTmp = new THREE.Vector3();
+
+    if (domainMode === "runtime" && viewMode === "3d" && rtShowArgNodes && rtSteps && rtSteps.length)
+    {
+      const st = rtSteps[rtIndex];
+      activeCallerId = st ? String(st.caller || "") : "";
+      activeCalleeId = st ? String(st.callee || "") : "";
+
+      const callerNode = nodeById[activeCallerId];
+      const calleeNode = nodeById[activeCalleeId];
+
+      if (callerNode && calleeNode)
+      {
+        pinMid.set(
+          (callerNode.x + calleeNode.x) * 0.5,
+          (callerNode.y + calleeNode.y) * 0.5,
+          (callerNode.z + calleeNode.z) * 0.5
+        );
+        pinEnabled = true;
+      }
+      else if (calleeNode)
+      {
+        pinMid.set(calleeNode.x, calleeNode.y, calleeNode.z);
+        pinEnabled = true;
+      }
+    }
+
+    const dataNodes = argNodes.concat(tokenNodes);
+
+    const activeToken = Object.create(null);
+
+    if (pinEnabled && touchedThisStep)
+    {
+      for (let i = 0; i < tokenNodes.length; i++)
+      {
+        const t = tokenNodes[i];
+        if (!t) continue;
+
+        if (!touchedThisStep[t.name]) continue;
+
+        const ownedByCaller = !!(t.owners && activeCallerId && t.owners[activeCallerId]);
+        const ownedByCallee = !!(t.owners && activeCalleeId && t.owners[activeCalleeId]);
+        if (!(ownedByCaller || ownedByCallee)) continue;
+
+        activeToken[t.name] = true;
+
+        if (!t._pinOff)
+        {
+          t._pinOff = {
+            x: (Math.random() - 0.5) * 90,
+            y: (Math.random() - 0.5) * 90,
+            z: (Math.random() - 0.5) * 90
+          };
+        }
+
+        t._pinTarget = {
+          x: pinMid.x + t._pinOff.x,
+          y: pinMid.y + t._pinOff.y,
+          z: pinMid.z + t._pinOff.z
+        };
+      }
+    }
+
     // pairwise repulsion
     for (let i = 0; i < nodes.length; i++)
     {
@@ -2465,7 +2946,7 @@ function start3D(graph, options)
     }
 
     // --- argument node forces (Runtime/3D only, when enabled) ---
-    if (domainMode === "runtime" && viewMode === "3d" && rtShowArgNodes && argNodes.length)
+    if (domainMode === "runtime" && viewMode === "3d" && rtShowArgNodes && dataNodes.length)
     {
       // 1) target = centroid of owning functions + per-name offset (spreads labels)
       function hash01(str)
@@ -2486,9 +2967,9 @@ function start3D(graph, options)
       const ringJitter = 16;
       const yBand = 16;
 
-      for (let i = 0; i < argNodes.length; i++)
+      for (let i = 0; i < dataNodes.length; i++)
       {
-        const a = argNodes[i];
+        const a = dataNodes[i];
         let cx = 0;
         let cy = 0;
         let cz = 0;
@@ -2511,7 +2992,7 @@ function start3D(graph, options)
           cz /= cnt;
         }
 
-        // Spread args around a ring to reduce label overlap.
+        // Spread args/tokens around a ring to reduce label overlap.
         const h0 = hash01(a.name);
         const h1 = hash01(a.name + ":b");
         const ang = h0 * Math.PI * 2;
@@ -2529,9 +3010,9 @@ function start3D(graph, options)
       const argSpringK = 0.006;
       const argDamp = 0.84;
       const argMaxV = 7.0;
-      for (let i = 0; i < argNodes.length; i++)
+      for (let i = 0; i < dataNodes.length; i++)
       {
-        const a = argNodes[i];
+        const a = dataNodes[i];
         a.vx += (a.target.x - a.x) * argSpringK;
         a.vy += (a.target.y - a.y) * argSpringK;
         a.vz += (a.target.z - a.z) * argSpringK;
@@ -2547,13 +3028,27 @@ function start3D(graph, options)
         if (a.vy < -argMaxV) a.vy = -argMaxV;
         if (a.vz > argMaxV) a.vz = argMaxV;
         if (a.vz < -argMaxV) a.vz = -argMaxV;
+
+        // Pin active teal tokens near the active runtime call.
+        if (pinEnabled && a && a.name && activeToken[a.name] && a._pinTarget)
+        {
+          pinTmp.set(a._pinTarget.x - a.x, a._pinTarget.y - a.y, a._pinTarget.z - a.z);
+          a.vx += pinTmp.x * pinK;
+          a.vy += pinTmp.y * pinK;
+          a.vz += pinTmp.z * pinK;
+
+          // Extra damping to kill jitter while pinned.
+          a.vx *= pinDamping;
+          a.vy *= pinDamping;
+          a.vz *= pinDamping;
+        }
       }
 
       // 3) repel from function nodes
       const argRepel = 900;
-      for (let i = 0; i < argNodes.length; i++)
+      for (let i = 0; i < dataNodes.length; i++)
       {
-        const a = argNodes[i];
+        const a = dataNodes[i];
         for (let j = 0; j < nodes.length; j++)
         {
           const b = nodes[j];
@@ -2578,14 +3073,14 @@ function start3D(graph, options)
         }
       }
 
-      // 4) repel from other arg nodes (label spacing)
+      // 4) repel from other data nodes (label spacing)
       const argArgRepel = 1400;
-      for (let i = 0; i < argNodes.length; i++)
+      for (let i = 0; i < dataNodes.length; i++)
       {
-        for (let j = i + 1; j < argNodes.length; j++)
+        for (let j = i + 1; j < dataNodes.length; j++)
         {
-          const a = argNodes[i];
-          const b = argNodes[j];
+          const a = dataNodes[i];
+          const b = dataNodes[j];
 
           let dx = a.x - b.x;
           let dy = a.y - b.y;
@@ -2613,25 +3108,35 @@ function start3D(graph, options)
         }
       }
 
-      // 5) pulse argument nodes when owning function is active
+      // 5) pulse data nodes when owning function is active
       const step = rtSteps && rtSteps[rtIndex];
       const activeFn = step ? step.callee : "";
 
-      for (let i = 0; i < argNodes.length; i++)
+      for (let i = 0; i < dataNodes.length; i++)
       {
-        const a = argNodes[i];
+        const a = dataNodes[i];
         const isActive = !!(activeFn && a.owners[activeFn]);
 
-        const targetScale = isActive ? 1.35 : 1.0;
+        const isToken = !!(a.mesh && a.mesh.userData && a.mesh.userData.tokenNode);
+        const baseScale = isToken ? TOKEN_SCALE : 1.0;
+        const activeScale = isToken ? (TOKEN_SCALE * 1.20) : 1.35;
+
+        const targetScale = isActive ? activeScale : baseScale;
         a._scale += (targetScale - a._scale) * 0.18;
 
         if (a.mesh)
         {
           a.mesh.scale.set(a._scale, a._scale, a._scale);
-          if (isActive)
-            a.mesh.material.color.setHex(0xff3dff);
+          if (isToken)
+          {
+            if (isActive) a.mesh.material.color.setHex(0x3fffff);
+            else a.mesh.material.color.setHex(0x00c2c7);
+          }
           else
-            a.mesh.material.color.setHex(0xb400ff);
+          {
+            if (isActive) a.mesh.material.color.setHex(0xff3dff);
+            else a.mesh.material.color.setHex(0xb400ff);
+          }
         }
       }
     }
@@ -2655,12 +3160,13 @@ function start3D(graph, options)
       }
     }
 
-    // integrate argument nodes
-    if (domainMode === "runtime" && viewMode === "3d" && rtShowArgNodes && argNodes.length)
+    // integrate signature args + runtime tokens
+    if (domainMode === "runtime" && viewMode === "3d" && rtShowArgNodes && (argNodes.length || tokenNodes.length))
     {
-      for (let i = 0; i < argNodes.length; i++)
+      const dataNodes = argNodes.concat(tokenNodes);
+      for (let i = 0; i < dataNodes.length; i++)
       {
-        const a = argNodes[i];
+        const a = dataNodes[i];
         a.x += a.vx;
         a.y += a.vy;
         a.z += a.vz;
@@ -2670,6 +3176,68 @@ function start3D(graph, options)
 
     updateEdgeMeshes();
   }
+
+    // Keep labels readable across zoom levels.
+    // Sprites are sized in world units, so we scale them based on camera distance.
+    function updateLabelScales()
+    {
+      const d = camera.position.distanceTo(controls.target);
+
+      // When zoomed in (small d) labels shrink; when zoomed out they grow.
+      // Enforce a hard maximum so labels never get huge.
+      const kRaw = d / 900;
+      const k = Math.max(0.28, Math.min(0.72, kRaw));
+
+      // Clamp ALL labels to the same max world-size so no label can dominate.
+      // This clamps by the larger of (width,height) in world units.
+      const LABEL_MAX_WORLD = 150;
+
+      function applySpriteScale(spr)
+      {
+        if (!spr || !spr.userData || !spr.userData.baseScale) return;
+        const bs = spr.userData.baseScale;
+
+        let sx = bs.x * k;
+        let sy = bs.y * k;
+
+        const m = Math.max(sx, sy);
+        if (m > LABEL_MAX_WORLD)
+        {
+          const f = LABEL_MAX_WORLD / m;
+          sx *= f;
+          sy *= f;
+        }
+
+        spr.scale.set(sx, sy, bs.z);
+      }
+
+      // Function node labels
+      for (let i = 0; i < graph.nodes.length; i++)
+      {
+        const n = graph.nodes[i];
+        if (!n || !n.mesh) continue;
+        const spr = n.mesh.userData ? n.mesh.userData.labelSprite : null;
+        applySpriteScale(spr);
+      }
+
+      // Arg cube labels
+      for (let i = 0; i < argNodes.length; i++)
+      {
+        const a = argNodes[i];
+        if (!a || !a.mesh) continue;
+        const spr = a.mesh.userData ? a.mesh.userData.labelSprite : null;
+        applySpriteScale(spr);
+      }
+
+      // Token cube labels
+      for (let i = 0; i < tokenNodes.length; i++)
+      {
+        const t = tokenNodes[i];
+        if (!t || !t.mesh) continue;
+        const spr = t.mesh.userData ? t.mesh.userData.labelSprite : null;
+        applySpriteScale(spr);
+      }
+    }
 
     function frame()
     {
@@ -2685,13 +3253,19 @@ function start3D(graph, options)
           if (rtAccum >= 0.9)
           {
             rtAccum = 0;
-            if (rtIndex < rtSteps.length - 1) rtIndex++;
+
+            // Loop forever until paused.
+            if (rtIndex < rtSteps.length - 1)
+            {
+              rtIndex++;
+            }
             else
             {
-              rtPlaying = false;
+              // Wrapped to the first step after completing a full pass.
+              rtIndex = 0;
               freezeTouchCounts = true;
-              updateHUD();
             }
+
             touchFromStep(rtSteps[rtIndex]);
             renderTouchedHud();
             renderRuntimeList();
@@ -2752,6 +3326,7 @@ function start3D(graph, options)
 
       controls.update();
       updateFog();
+      updateLabelScales();
       renderer.render(scene, camera);
       requestAnimationFrame(frame);
     }

@@ -46,6 +46,14 @@
       height: 180px;
     }
 
+    body.hud_hidden #hud_left,
+    body.hud_hidden #hud_center,
+    body.hud_hidden #hud_right,
+    body.hud_hidden #hud_vars_wrap,
+    body.hud_hidden #minimap {
+      display: none !important;
+    }
+
     #hud_vars_wrap {
       position: fixed;
       left: 12px;
@@ -624,6 +632,10 @@
     <label id="rt_show_arg_nodes_wrap" style="display:flex; align-items:center; gap:6px; font-size:12px; opacity:0.9; user-select:none; color:#ffffff;">
       <input id="rt_show_arg_nodes" type="checkbox" checked />
       Show argument nodes in 3D
+    </label>
+    <label id="hud_hide_wrap" style="display:flex; align-items:center; gap:6px; font-size:12px; opacity:0.9; user-select:none; color:#ffffff;">
+      <input id="hud_hide" type="checkbox" />
+      Hide HUD
     </label>
   </div>
   <div id="rt_main_label"></div>
