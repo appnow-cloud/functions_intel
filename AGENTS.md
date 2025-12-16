@@ -123,3 +123,11 @@ Implementation outline:
 
 This document defines the canonical Codex prompts for large structural and visualization changes
 in the Functions Graph 3D system.
+
+## Agent Response (2025-02-11)
+- Split the inline module script out of `index.html` into the new `fg3d.js` ES module and exposed `bootFunctionsGraph3D` for bootstrapping.
+- Updated the HTML to import the toolkit module while keeping the import map intact and preserving runtime behavior.
+
+### Suggestions for next steps
+- Add lightweight smoke tests (e.g., a Playwright or Cypress script) to ensure the viewer boots successfully after refactors.
+- Document the new toolkit API in `README.md` so downstream consumers know how to pass custom roots, data URLs, or error hooks.
