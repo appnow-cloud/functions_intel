@@ -124,6 +124,8 @@
     .varname {
       color: #ffffff;
       font-weight: 600;
+      flex: 1 1 auto;
+      min-width: 0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -142,19 +144,32 @@
       flex-direction: row;
       align-items: center;
       justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .varmeta_right {
+      display: flex;
+      align-items: center;
       gap: 8px;
+      flex: 0 0 auto;
+      flex-shrink: 0;
       min-width: 0;
     }
 
     .varbadge {
-      width: 18px;
-      height: 18px;
+      width: 22px;
+      height: 22px;
+      min-width: 22px;
       border-radius: 999px;
       border: 1px solid rgba(255,255,255,0.22);
       background: rgba(255,255,255,0.10);
       color: #ffffff;
       font-size: 11px;
-      line-height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
       text-align: center;
       flex: 0 0 auto;
       user-select: none;
@@ -602,9 +617,13 @@
       <option value="2">2x</option>
       <option value="5">5x</option>
     </select>
-    <label id="rt_show_inactive_wrap" style="display:flex; align-items:center; gap:6px; font-size:12px; opacity:0.9; user-select:none;">
+    <label id="rt_show_inactive_wrap" style="display:flex; align-items:center; gap:6px; font-size:12px; opacity:0.9; user-select:none; color:#ffffff;">
       <input id="rt_show_inactive" type="checkbox" checked />
       Show inactive vars
+    </label>
+    <label id="rt_show_arg_nodes_wrap" style="display:flex; align-items:center; gap:6px; font-size:12px; opacity:0.9; user-select:none; color:#ffffff;">
+      <input id="rt_show_arg_nodes" type="checkbox" checked />
+      Show argument nodes in 3D
     </label>
   </div>
   <div id="rt_main_label"></div>

@@ -288,7 +288,8 @@ function start3D(graph, options)
   const rtStepsEl = document.getElementById("rt_steps");
   const rtMainLabel = document.getElementById("rt_main_label");
   const rtShowInactiveEl = document.getElementById("rt_show_inactive");
-
+  const rtShowArgNodesEl = document.getElementById("rt_show_arg_nodes");
+  
   const fnModalBackdrop = document.getElementById("fn_modal_backdrop");
   const fnModalTitle = document.getElementById("fn_modal_title");
   const fnModalBody = document.getElementById("fn_modal_body");
@@ -339,18 +340,95 @@ function start3D(graph, options)
   controls.rotateSpeed = 0.6;
   controls.zoomSpeed = 0.9;
 
-  const lightA = new THREE.AmbientLight(0xffffff, 0.55);
+  const lightA = new THREE.AmbientLight(0xffffff, 0.85);
   scene.add(lightA);
 
-  const lightB = new THREE.DirectionalLight(0xffffff, 0.85);
+  const lightB = new THREE.DirectionalLight(0xffffff, 1.2);
   lightB.position.set(1, 1, 1);
   scene.add(lightB);
+
+  // Fill light to reduce harsh falloff
+  const lightC = new THREE.DirectionalLight(0xffffff, 0.6);
+  lightC.position.set(-1, -0.6, -0.8);
+  scene.add(lightC);
 
   const nodeMat = new THREE.MeshStandardMaterial({ color: 0x4fb3ff });
   const hoverMat = new THREE.MeshStandardMaterial({ color: 0xcfe8ff });
   const selMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
   const rtActiveMat = new THREE.MeshStandardMaterial({ color: 0xffd54f });
   const rtCalleeMat = new THREE.MeshStandardMaterial({ color: 0xff8a65 });
+
+  // Runtime/3D: optional argument nodes (unique by name)
+  const argNodes = []; // { name, owners, x,y,z,vx,vy,vz,r,mesh,target }
+  const argNodeByName = Object.create(null);
+  let rtShowArgNodes = true;
+
+  const argMat = new THREE.MeshStandardMaterial({ color: 0xb400ff });
+
+  function makeLabelSprite(text, opts)
+  {
+    const o = opts || {};
+    const fontSize = o.fontSize || 18;
+    const padX = o.padX || 10;
+    const padY = o.padY || 6;
+    const bg = (o.bg != null) ? o.bg : "rgba(0,0,0,0.65)";
+    const fg = o.fg || "#ffffff";
+    const radius = o.radius || 8;
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const font = fontSize + "px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+    ctx.font = font;
+
+    const s = String(text || "");
+    const tw = Math.ceil(ctx.measureText(s).width);
+    const w = tw + padX * 2;
+    const h = fontSize + padY * 2;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.ceil(w * dpr);
+    canvas.height = Math.ceil(h * dpr);
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = font;
+
+    function rr(x, y, ww, hh, r)
+    {
+      const rr = Math.min(r, ww * 0.5, hh * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + ww, y, x + ww, y + hh, rr);
+      ctx.arcTo(x + ww, y + hh, x, y + hh, rr);
+      ctx.arcTo(x, y + hh, x, y, rr);
+      ctx.arcTo(x, y, x + ww, y, rr);
+      ctx.closePath();
+    }
+
+    rr(0, 0, w, h, radius);
+    ctx.fillStyle = bg;
+    ctx.fill();
+
+    ctx.fillStyle = fg;
+    ctx.textBaseline = "middle";
+    ctx.fillText(s, padX, h * 0.5);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+    const spr = new THREE.Sprite(mat);
+
+    // World scale: tune to your scene size
+    const worldScale = o.worldScale || 0.55;
+    spr.scale.set(w * worldScale, h * worldScale, 1);
+
+    return spr;
+  }
 
   // Force runtime highlight node materials to be fully opaque.
   // (If a shared material ever becomes transparent/low-alpha, all nodes using it will look "dim".)
@@ -371,7 +449,19 @@ function start3D(graph, options)
     n.mesh = mesh;
     meshes.push(mesh);
     scene.add(mesh);
+
+    const fnLabel = makeLabelSprite(n.name, {
+      fontSize: 18,
+      worldScale: 0.55,
+      bg: "rgba(11,15,20,0.78)",
+      fg: "#ffffff",
+      radius: 10
+    });
+    fnLabel.position.set(0, n.r + 10, 0);
+    mesh.add(fnLabel);
+    mesh.userData.labelSprite = fnLabel;
   }
+
 
   const nodeById = Object.create(null);
   for (let i = 0; i < graph.nodes.length; i++)
@@ -500,6 +590,131 @@ function start3D(graph, options)
     if (f && f.function_name) funcByName[f.function_name] = f;
   }
 
+  // Build unique argument nodes from static function inputs
+  (function buildArgNodes()
+  {
+    const funcs = (DATA && Array.isArray(DATA.functions)) ? DATA.functions : [];
+    for (let i = 0; i < funcs.length; i++)
+    {
+      const f = funcs[i];
+      const fnName = f ? f.function_name : "";
+      const args = (f && f.inputs && Array.isArray(f.inputs.args)) ? f.inputs.args : [];
+      if (!fnName || !args.length) continue;
+
+      for (let k = 0; k < args.length; k++)
+      {
+        const nm = String(args[k] || "");
+        if (!nm) continue;
+
+        let an = argNodeByName[nm];
+        if (!an)
+        {
+          an = {
+            name: nm,
+            owners: Object.create(null),
+            x: (Math.random() - 0.5) * 200,
+            y: (Math.random() - 0.5) * 200,
+            z: (Math.random() - 0.5) * 200,
+            vx: 0,
+            vy: 0,
+            vz: 0,
+            r: 4.0,
+            mesh: null,
+            target: { x: 0, y: 0, z: 0 },
+            _scale: 1.0
+          };
+          argNodeByName[nm] = an;
+          argNodes.push(an);
+        }
+
+        an.owners[fnName] = true;
+      }
+    }
+  })();
+
+  // Create meshes for argument nodes (purple cubes)
+  for (let i = 0; i < argNodes.length; i++)
+  {
+    const a = argNodes[i];
+    const s = 6;
+    const geo = new THREE.BoxGeometry(s, s, s);
+    const mesh = new THREE.Mesh(geo, argMat);
+    mesh.userData.argNode = a;
+    mesh.position.set(a.x, a.y, a.z);
+    mesh.visible = false; // only visible in Runtime/3D when enabled
+    a.mesh = mesh;
+    scene.add(mesh);
+
+    const argLabel = makeLabelSprite(a.name, {
+      fontSize: 16,
+      worldScale: 0.45,
+      bg: "rgba(0,0,0,0.70)",
+      fg: "#ffffff",
+      radius: 10
+    });
+    argLabel.position.set(0, 10, 0);
+    mesh.add(argLabel);
+    mesh.userData.labelSprite = argLabel;
+  }
+
+  // --- argument links: line segments from arg nodes to owning function nodes ---
+  const argLinks = []; // { a: argNode, n: functionNode }
+  for (let i = 0; i < argNodes.length; i++)
+  {
+    const a = argNodes[i];
+    for (const fn in a.owners)
+    {
+      const n = nodeById[fn];
+      if (!n) continue;
+      argLinks.push({ a: a, n: n });
+    }
+  }
+
+  let argLinkLine = null;
+  let argLinkPos = null;
+
+  if (argLinks.length)
+  {
+    argLinkPos = new Float32Array(argLinks.length * 2 * 3);
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(argLinkPos, 3));
+    geo.attributes.position.setUsage(THREE.DynamicDrawUsage);
+
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xb400ff,
+      transparent: true,
+      opacity: 0.25
+    });
+
+    argLinkLine = new THREE.LineSegments(geo, mat);
+    argLinkLine.visible = false;
+    scene.add(argLinkLine);
+  }
+
+  function updateArgLinkLines()
+  {
+    if (!argLinkLine || !argLinkPos) return;
+
+    for (let i = 0; i < argLinks.length; i++)
+    {
+      const L = argLinks[i];
+      const a = L.a;
+      const n = L.n;
+
+      const o = i * 6;
+      argLinkPos[o + 0] = a.x;
+      argLinkPos[o + 1] = a.y;
+      argLinkPos[o + 2] = a.z;
+
+      argLinkPos[o + 3] = n.x;
+      argLinkPos[o + 4] = n.y;
+      argLinkPos[o + 5] = n.z;
+    }
+
+    argLinkLine.geometry.attributes.position.needsUpdate = true;
+  }
+
   // Runtime: track "touched" data names as we step (heuristic).
   const touched = Object.create(null); // name -> { count, first_line, last_step, order }
   let touchOrder = 0;
@@ -518,7 +733,7 @@ function start3D(graph, options)
     freezeTouchCounts = false;
   }
 
-  function addTouch(name, line)
+  function addTouch(name, line, kind)
   {
     if (!name) return;
 
@@ -528,9 +743,12 @@ function start3D(graph, options)
         count: 0,
         first_line: line,
         last_step: rtIndex,
-        order: touchOrder++
+        order: touchOrder++,
+        kinds: Object.create(null)
       };
     }
+
+    if (kind) touched[name].kinds[kind] = true;
 
     if (!freezeTouchCounts) touched[name].count++;
     touched[name].last_step = rtIndex;
@@ -591,23 +809,43 @@ function start3D(graph, options)
 
     const calleeFn = funcByName[step.callee];
 
+    // Tag globals/functions when a touched name matches known static intel.
+    const globals = (DATA && DATA.globals && Array.isArray(DATA.globals.global_vars))
+      ? DATA.globals.global_vars
+      : [];
+    const globalSet = Object.create(null);
+    for (let gi = 0; gi < globals.length; gi++)
+    {
+      const gn = globals[gi];
+      if (gn) globalSet[String(gn)] = true;
+    }
+
     // 1) Callee inputs (var-ish)
     if (calleeFn && calleeFn.inputs && Array.isArray(calleeFn.inputs.args))
     {
       const args = calleeFn.inputs.args;
-      for (let i = 0; i < args.length; i++) addTouch(args[i], step.line);
+      for (let i = 0; i < args.length; i++) addTouch(args[i], step.line, "input");
     }
 
     // 2) Callee locals (var-ish)
     if (calleeFn && calleeFn.locals && Array.isArray(calleeFn.locals.local_vars))
     {
       const lvars = calleeFn.locals.local_vars;
-      for (let i = 0; i < lvars.length; i++) addTouch(lvars[i], step.line);
+      for (let i = 0; i < lvars.length; i++) addTouch(lvars[i], step.line, "local");
     }
 
     // 3) Names seen in args preview (existing behavior)
     const names = extractNamesFromArgs(step.args_preview);
-    for (let i = 0; i < names.length; i++) addTouch(names[i], step.line);
+    for (let i = 0; i < names.length; i++)
+    {
+      const nm = names[i];
+      if (!nm) continue;
+
+      // If the token matches a function name, prefer labeling as a function.
+      if (funcByName && funcByName[nm]) addTouch(nm, step.line, "function");
+      else if (globalSet[nm]) addTouch(nm, step.line, "global");
+      else addTouch(nm, step.line, "token");
+    }
 
     // 4) Writes targets (normalize to base identifier)
     if (calleeFn && calleeFn.writes && calleeFn.writes.none === false)
@@ -616,7 +854,7 @@ function start3D(graph, options)
       for (let i = 0; i < targets.length; i++)
       {
         const base = normalizeTouchedName(targets[i]);
-        if (base) addTouch(base, step.line);
+        if (base) addTouch(base, step.line, "output");
       }
     }
 
@@ -627,7 +865,7 @@ function start3D(graph, options)
       for (let i = 0; i < rets.length; i++)
       {
         const base = normalizeTouchedName(rets[i]);
-        if (base) addTouch(base, step.line);
+        if (base) addTouch(base, step.line, "output");
       }
     }
   }
@@ -635,6 +873,27 @@ function start3D(graph, options)
   function renderTouchedHud()
   {
     if (!hudVars) return;
+
+    function pickKindLabel(kinds)
+    {
+      const ks = kinds || Object.create(null);
+      const order = ["function", "global", "input", "local", "output", "token"];
+      for (let i = 0; i < order.length; i++)
+      {
+        if (ks[order[i]]) return order[i];
+      }
+      return "token";
+    }
+
+    function kindText(k)
+    {
+      if (k === "function") return "function";
+      if (k === "global") return "global";
+      if (k === "input") return "input";
+      if (k === "local") return "local";
+      if (k === "output") return "output";
+      return "token";
+    }
 
     const items = [];
 
@@ -652,7 +911,9 @@ function start3D(graph, options)
           first_line: touched[k].first_line,
           last_step: touched[k].last_step,
           order: touched[k].order,
-          step_count: (touchedThisStep[k] || 0)
+          step_count: (touchedThisStep[k] || 0),
+          kinds: (touched[k].kinds || Object.create(null)),
+          kind: pickKindLabel(touched[k].kinds)
         });
       }
 
@@ -676,14 +937,16 @@ function start3D(graph, options)
         const last_step = info ? info.last_step : 0;
         const count = info ? info.count : 0;
         const stepCnt = (touchedThisStep[k] || 0);
-
+        const kinds = info ? (info.kinds || Object.create(null)) : Object.create(null);
         items.push({
           name: k,
           count: count,
           first_line: first_line,
           last_step: last_step,
           order: order,
-          step_count: stepCnt
+          step_count: stepCnt,
+          kinds: kinds,
+          kind: pickKindLabel(kinds)
         });
       }
 
@@ -713,11 +976,15 @@ function start3D(graph, options)
         ? ("varbox" + (isActive ? " active" : ""))
         : ("varbox " + (isActive ? "active" : "dim"));
 
+      // Render the header with kind pill
       parts.push(
         '<div class="' + cls + '">' +
           '<div class="varhead">' +
             '<div class="varname">' + escapeHtml(it.name) + '</div>' +
-            '<div class="varbadge">' + (rtShowInactiveVars ? it.count : it.step_count) + '</div>' +
+            '<div class="varmeta_right">' +
+              '<span class="varkind varkind-' + escapeHtml(it.kind) + '">' + escapeHtml(kindText(it.kind)) + '</span>' +
+              '<div class="varbadge">' + (rtShowInactiveVars ? it.count : it.step_count) + '</div>' +
+            '</div>' +
           '</div>' +
           '<div class="varmeta">first line: ' + it.first_line + '</div>' +
         '</div>'
@@ -742,7 +1009,6 @@ function start3D(graph, options)
 
     if (bestName)
     {
-      const activeEl = hudVars.querySelector('.varbox .varname');
       // Query the specific box by matching rendered name text.
       // (List is rebuilt each step; keep it simple and robust.)
       const boxes = hudVars.querySelectorAll('.varbox');
@@ -924,6 +1190,7 @@ function start3D(graph, options)
     });
   }
 
+
   // Picking
   const raycaster = new THREE.Raycaster();
   const mouse = new THREE.Vector2();
@@ -931,6 +1198,55 @@ function start3D(graph, options)
   let selectedNode = null;
   let hoverEdge = null;
   let selectedEdge = null;
+
+  // Runtime/3D label visibility (driven by Show inactive vars)
+  let lastLabelMode = null;
+  let lastLabelCaller = "";
+  let lastLabelCallee = "";
+
+  function syncRuntimeLabelVisibility(step)
+  {
+    if (!(domainMode === "runtime" && viewMode === "3d")) return;
+
+    const activeOnly = !rtShowInactiveVars;
+    const callerId = step ? String(step.caller || "") : "";
+    const calleeId = step ? String(step.callee || "") : "";
+
+    if (lastLabelMode === activeOnly &&
+        lastLabelCaller === callerId &&
+        lastLabelCallee === calleeId)
+    {
+      return;
+    }
+
+    lastLabelMode = activeOnly;
+    lastLabelCaller = callerId;
+    lastLabelCallee = calleeId;
+
+    // Function node labels
+    for (let i = 0; i < graph.nodes.length; i++)
+    {
+      const n = graph.nodes[i];
+      if (!n || !n.mesh) continue;
+      const spr = n.mesh.userData ? n.mesh.userData.labelSprite : null;
+      if (!spr) continue;
+
+      if (!activeOnly) spr.visible = true;
+      else spr.visible = (n.id === callerId || n.id === calleeId);
+    }
+
+    // Arg cube labels
+    for (let i = 0; i < argNodes.length; i++)
+    {
+      const a = argNodes[i];
+      if (!a || !a.mesh) continue;
+      const spr = a.mesh.userData ? a.mesh.userData.labelSprite : null;
+      if (!spr) continue;
+
+      if (!activeOnly) spr.visible = true;
+      else spr.visible = !!(calleeId && a.owners && a.owners[calleeId]);
+    }
+  }
 
   function setHover(n)
   {
@@ -1042,14 +1358,14 @@ function start3D(graph, options)
             e.mesh.userData.baseColor = e.mesh.material.color.getHex();
           }
 
-          // Blink: pulse both opacity and color while this edge is the active runtime step.
+          // Blink: make ONLY the active runtime edge bright.
           const pulse = 0.5 + (Math.sin(rtPulseT) * 0.5);
           if (e.mesh.material && e.mesh.material.color)
           {
-            e.mesh.material.color.setHex(0xffd54f);
+            e.mesh.material.color.setHex(0xffffff);
           }
           e.mesh.material.transparent = true;
-          e.mesh.material.opacity = Math.min(0.92, (e.mesh.userData.baseOpacity || 0.35) + 0.10 + pulse * 0.22);
+          e.mesh.material.opacity = Math.min(0.995, (e.mesh.userData.baseOpacity || 0.55) + 0.25 + pulse * 0.35);
         }
         break;
       }
@@ -1070,6 +1386,8 @@ function start3D(graph, options)
   {
     // Sync runtime var-filter flag from UI
     rtShowInactiveVars = rtShowInactiveEl ? !!rtShowInactiveEl.checked : true;
+    // Sync arg-nodes flag from UI
+    rtShowArgNodes = rtShowArgNodesEl ? !!rtShowArgNodesEl.checked : true;
     if (rtMainOverrideName && nodeById[rtMainOverrideName])
     {
       rtMain = nodeById[rtMainOverrideName];
@@ -1483,6 +1801,16 @@ function start3D(graph, options)
       else if (hudVars) hudVars.innerHTML = "";
 
       if (rtShowInactiveVars) resizeVarsMinimap();
+
+      // Show/hide argument nodes in Runtime/3D
+      rtShowArgNodes = rtShowArgNodesEl ? !!rtShowArgNodesEl.checked : rtShowArgNodes;
+      for (let i = 0; i < argNodes.length; i++)
+      {
+        const m = argNodes[i].mesh;
+        if (m) m.visible = rtShowArgNodes;
+      }
+
+      if (argLinkLine) argLinkLine.visible = rtShowArgNodes;
     }
 
 
@@ -1505,6 +1833,26 @@ function start3D(graph, options)
       // Vars are cleared by resetTouched() when runtime data is rebuilt.
       const hudVarsMini = document.getElementById("hud_vars_minimap");
       if (hudVarsMini) hudVarsMini.style.display = "none";
+
+      // Reset runtime label cache so we resync on next entry
+      lastLabelMode = null;
+      lastLabelCaller = "";
+      lastLabelCallee = "";
+
+      // Hide and reset argument nodes when not in Runtime/3D
+      for (let i = 0; i < argNodes.length; i++)
+      {
+        const a = argNodes[i];
+        if (a.mesh)
+        {
+          a.mesh.visible = false;
+          a._scale = 1.0;
+          a.mesh.scale.set(1, 1, 1);
+          a.mesh.material.color.setHex(0xb400ff);
+        }
+      }
+
+      if (argLinkLine) argLinkLine.visible = false;
     }
 
     // Ensure highlight state matches current mode.
@@ -1919,6 +2267,22 @@ function start3D(graph, options)
     {
       rtShowInactiveVars = !!rtShowInactiveEl.checked;
       renderTouchedHud();
+
+      // Also apply to 3D labels immediately (Runtime/3D only)
+      if (domainMode === "runtime" && viewMode === "3d")
+      {
+        const st = (rtSteps && rtSteps.length) ? rtSteps[rtIndex] : null;
+        syncRuntimeLabelVisibility(st);
+      }
+    });
+  }
+
+  if (rtShowArgNodesEl)
+  {
+    rtShowArgNodesEl.addEventListener("change", function()
+    {
+      rtShowArgNodes = !!rtShowArgNodesEl.checked;
+      applyUIState();
     });
   }
 
@@ -2100,6 +2464,178 @@ function start3D(graph, options)
       b.vz -= dz * f;
     }
 
+    // --- argument node forces (Runtime/3D only, when enabled) ---
+    if (domainMode === "runtime" && viewMode === "3d" && rtShowArgNodes && argNodes.length)
+    {
+      // 1) target = centroid of owning functions + per-name offset (spreads labels)
+      function hash01(str)
+      {
+        // Deterministic 0..1 hash
+        const s = String(str || "");
+        let h = 2166136261;
+        for (let i = 0; i < s.length; i++)
+        {
+          h ^= s.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        // Convert to 0..1
+        return ((h >>> 0) % 100000) / 100000;
+      }
+
+      const baseRing = 34;
+      const ringJitter = 16;
+      const yBand = 16;
+
+      for (let i = 0; i < argNodes.length; i++)
+      {
+        const a = argNodes[i];
+        let cx = 0;
+        let cy = 0;
+        let cz = 0;
+        let cnt = 0;
+
+        for (const fn in a.owners)
+        {
+          const n = nodeById[fn];
+          if (!n) continue;
+          cx += n.x;
+          cy += n.y;
+          cz += n.z;
+          cnt++;
+        }
+
+        if (cnt > 0)
+        {
+          cx /= cnt;
+          cy /= cnt;
+          cz /= cnt;
+        }
+
+        // Spread args around a ring to reduce label overlap.
+        const h0 = hash01(a.name);
+        const h1 = hash01(a.name + ":b");
+        const ang = h0 * Math.PI * 2;
+        const rr = baseRing + h1 * ringJitter + Math.min(22, cnt * 6);
+        const ox = Math.cos(ang) * rr;
+        const oz = Math.sin(ang) * rr;
+        const oy = (h1 - 0.5) * yBand;
+
+        a.target.x = cx + ox;
+        a.target.y = cy + 12 + oy;
+        a.target.z = cz + oz;
+      }
+
+      // 2) pull toward target
+      const argSpringK = 0.006;
+      const argDamp = 0.84;
+      const argMaxV = 7.0;
+      for (let i = 0; i < argNodes.length; i++)
+      {
+        const a = argNodes[i];
+        a.vx += (a.target.x - a.x) * argSpringK;
+        a.vy += (a.target.y - a.y) * argSpringK;
+        a.vz += (a.target.z - a.z) * argSpringK;
+
+        a.vx *= argDamp;
+        a.vy *= argDamp;
+        a.vz *= argDamp;
+
+        // Clamp velocity so collisions don't cause popping/jitter
+        if (a.vx > argMaxV) a.vx = argMaxV;
+        if (a.vx < -argMaxV) a.vx = -argMaxV;
+        if (a.vy > argMaxV) a.vy = argMaxV;
+        if (a.vy < -argMaxV) a.vy = -argMaxV;
+        if (a.vz > argMaxV) a.vz = argMaxV;
+        if (a.vz < -argMaxV) a.vz = -argMaxV;
+      }
+
+      // 3) repel from function nodes
+      const argRepel = 900;
+      for (let i = 0; i < argNodes.length; i++)
+      {
+        const a = argNodes[i];
+        for (let j = 0; j < nodes.length; j++)
+        {
+          const b = nodes[j];
+          let dx = a.x - b.x;
+          let dy = a.y - b.y;
+          let dz = a.z - b.z;
+
+          const minD = (a.r + b.r + 8);
+          const d2 = dx*dx + dy*dy + dz*dz + 0.01;
+          const d = Math.sqrt(d2);
+          if (d > minD) continue;
+
+          const f = argRepel / Math.max(1, d2);
+          const invD = 1 / Math.max(0.0001, d);
+          dx *= invD;
+          dy *= invD;
+          dz *= invD;
+
+          a.vx += dx * f;
+          a.vy += dy * f;
+          a.vz += dz * f;
+        }
+      }
+
+      // 4) repel from other arg nodes (label spacing)
+      const argArgRepel = 1400;
+      for (let i = 0; i < argNodes.length; i++)
+      {
+        for (let j = i + 1; j < argNodes.length; j++)
+        {
+          const a = argNodes[i];
+          const b = argNodes[j];
+
+          let dx = a.x - b.x;
+          let dy = a.y - b.y;
+          let dz = a.z - b.z;
+
+          const minD = 26; // spacing target for label readability
+          const d2 = dx*dx + dy*dy + dz*dz + 0.01;
+          const d = Math.sqrt(d2);
+          if (d > minD) continue;
+
+          const overlap = (minD - d);
+          const f = (argArgRepel * (overlap / minD)) / Math.max(1, d2);
+          const invD = 1 / Math.max(0.0001, d);
+          dx *= invD;
+          dy *= invD;
+          dz *= invD;
+
+          a.vx += dx * f;
+          a.vy += dy * f;
+          a.vz += dz * f;
+
+          b.vx -= dx * f;
+          b.vy -= dy * f;
+          b.vz -= dz * f;
+        }
+      }
+
+      // 5) pulse argument nodes when owning function is active
+      const step = rtSteps && rtSteps[rtIndex];
+      const activeFn = step ? step.callee : "";
+
+      for (let i = 0; i < argNodes.length; i++)
+      {
+        const a = argNodes[i];
+        const isActive = !!(activeFn && a.owners[activeFn]);
+
+        const targetScale = isActive ? 1.35 : 1.0;
+        a._scale += (targetScale - a._scale) * 0.18;
+
+        if (a.mesh)
+        {
+          a.mesh.scale.set(a._scale, a._scale, a._scale);
+          if (isActive)
+            a.mesh.material.color.setHex(0xff3dff);
+          else
+            a.mesh.material.color.setHex(0xb400ff);
+        }
+      }
+    }
+
     // integrate
     for (let i = 0; i < nodes.length; i++)
     {
@@ -2116,6 +2652,19 @@ function start3D(graph, options)
       if (n.mesh)
       {
         n.mesh.position.set(n.x, n.y, n.z);
+      }
+    }
+
+    // integrate argument nodes
+    if (domainMode === "runtime" && viewMode === "3d" && rtShowArgNodes && argNodes.length)
+    {
+      for (let i = 0; i < argNodes.length; i++)
+      {
+        const a = argNodes[i];
+        a.x += a.vx;
+        a.y += a.vy;
+        a.z += a.vz;
+        if (a.mesh) a.mesh.position.set(a.x, a.y, a.z);
       }
     }
 
@@ -2161,6 +2710,7 @@ function start3D(graph, options)
         clearRuntimeHighlight();
         const st = rtSteps[rtIndex];
 
+        syncRuntimeLabelVisibility(st);
         // Base highlight (also bumps edge opacity)
         applyRuntimeHighlight(st);
 
@@ -2194,6 +2744,12 @@ function start3D(graph, options)
 
       drawMinimap();
       tick();
+
+      if (domainMode === "runtime" && viewMode === "3d" && rtShowArgNodes)
+      {
+        updateArgLinkLines();
+      }
+
       controls.update();
       updateFog();
       renderer.render(scene, camera);
